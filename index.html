@@ -11,21 +11,19 @@
         #reader { width: 100%; max-width: 400px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; }
         .card { background: white; padding: 20px; border-radius: 10px; margin-top: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         
-        /* Botón de archivo personalizado */
-        .btn-file { background: #28a745; color: white; padding: 12px; border-radius: 5px; cursor: pointer; display: block; margin-top: 10px; font-weight: bold; }
+        /* Botón de archivo independiente */
+        .btn-file { background: #28a745; color: white; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; margin-top: 15px; display: inline-block; border: none; font-size: 16px; }
         input[type="file"] { display: none; }
 
         /* Búsqueda manual */
         .search-box { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
         input[type="number"] { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; text-align: center; }
         button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; font-weight: bold; }
-        button:active { background: #0056b3; }
         
-        /* Ficha de producto */
         img { max-width: 150px; border-radius: 8px; margin: 10px auto; display: block; }
         #nombre { margin: 10px 0 2px 0; font-size: 24px; }
-        #formato { margin: 2px 0; font-size: 18px; font-weight: normal; }
-        #fabricante { color: gray; margin: 2px 0 0 0; font-size: 16px; font-weight: normal; }
+        #formato { margin: 2px 0; font-size: 18px; }
+        #fabricante { color: gray; margin: 2px 0 0 0; font-size: 16px; }
         #estado { color: #007bff; font-weight: bold; margin-top: 10px; display: none; }
     </style>
 </head>
@@ -33,16 +31,14 @@
 
     <h2>Escáner de Productos</h2>
     
-    <!-- Contenedor del escáner de cámara -->
     <div id="reader"></div>
 
-    <!-- Botón para subir foto -->
+    <!-- Botón que abre el selector de archivos -->
     <label class="btn-file">
         Escanear desde foto
-        <input type="file" id="qr-input-file" accept="image/*">
+        <input type="file" id="file-input" accept="image/*">
     </label>
 
-    <!-- Sección de búsqueda manual -->
     <div class="card">
         <p style="margin: 0 0 5px 0; color: gray; font-size: 14px;">¿Ingresar manual?</p>
         <div class="search-box">
@@ -51,10 +47,8 @@
         </div>
     </div>
 
-    <!-- Mensaje de estado -->
-    <div id="estado">Buscando en múltiples bases de datos...</div>
+    <div id="estado">Buscando en bases de datos...</div>
 
-    <!-- Ficha del producto -->
     <div class="card" id="producto-info" style="display: none;">
         <img id="foto" src="" alt="Foto del producto">
         <h2 id="nombre"></h2>
@@ -63,22 +57,16 @@
     </div>
 
     <script>
-        // 1. Service Worker para PWA
+        // Registrar Service Worker
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js').catch(err => console.log("SW falló", err));
+            navigator.serviceWorker.register('sw.js');
         }
 
-        // 2. Base de datos local
         let miBaseDatos = JSON.parse(localStorage.getItem('misProductos')) || {};
 
-        // 3. Sistema de puntuación para elegir el mejor resultado de las APIs
+        // Función para procesar y puntuar productos
         function crearCandidato(nom, form, fab, img) {
-            let p = {
-                nombre: nom || 'Nombre no disponible',
-                formato: form || 'Formato desconocido',
-                fabricante: fab || 'Fabricante desconocido',
-                foto: img || ''
-            };
+            let p = { nombre: nom || 'Nombre no disponible', formato: form || 'Formato desconocido', fabricante: fab || 'Fabricante desconocido', foto: img || '' };
             let puntos = 0;
             if (p.nombre !== 'Nombre no disponible') puntos += 3;
             if (p.formato !== 'Formato desconocido') puntos += 1;
@@ -88,25 +76,23 @@
             return p;
         }
 
-        // 4. Motor de búsqueda (Consulta local y luego las 3 APIs)
-        async function buscarProducto(codigoEscaneado) {
+        // Motor de búsqueda centralizado
+        async function buscarProducto(codigo) {
             document.getElementById('estado').style.display = 'block';
             document.getElementById('producto-info').style.display = 'none';
-            document.getElementById('input-manual').value = codigoEscaneado; // Reflejar en el input
+            document.getElementById('input-manual').value = codigo;
 
-            // Buscar en DB local
-            if (miBaseDatos[codigoEscaneado]) {
-                mostrarProducto(miBaseDatos[codigoEscaneado]);
+            if (miBaseDatos[codigo]) {
+                mostrarProducto(miBaseDatos[codigo]);
                 document.getElementById('estado').style.display = 'none';
                 return;
             }
 
-            // Buscar online
             try {
                 const promesas = [
-                    fetch(`https://world.openfoodfacts.org/api/v0/product/${codigoEscaneado}.json`).then(r => r.json()).catch(() => null),
-                    fetch(`https://world.openproductsfacts.org/api/v0/product/${codigoEscaneado}.json`).then(r => r.json()).catch(() => null),
-                    fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${codigoEscaneado}`).then(r => r.json()).catch(() => null)
+                    fetch(`https://world.openfoodfacts.org/api/v0/product/${codigo}.json`).then(r => r.json()).catch(() => null),
+                    fetch(`https://world.openproductsfacts.org/api/v0/product/${codigo}.json`).then(r => r.json()).catch(() => null),
+                    fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${codigo}`).then(r => r.json()).catch(() => null)
                 ];
 
                 const resultados = await Promise.all(promesas);
@@ -129,79 +115,43 @@
                     candidatos.sort((a, b) => b.puntaje - a.puntaje);
                     const mejorProducto = candidatos[0];
                     delete mejorProducto.puntaje;
-
-                    miBaseDatos[codigoEscaneado] = mejorProducto;
+                    miBaseDatos[codigo] = mejorProducto;
                     localStorage.setItem('misProductos', JSON.stringify(miBaseDatos));
                     mostrarProducto(mejorProducto);
                 } else {
-                    alert("Producto no encontrado en las bases de datos.");
+                    alert("Producto no encontrado.");
                 }
             } catch (error) {
                 alert("Error de conexión.");
             }
-
             document.getElementById('estado').style.display = 'none';
         }
 
-        // 5. Mostrar en pantalla
         function mostrarProducto(p) {
             document.getElementById('producto-info').style.display = 'block';
             document.getElementById('nombre').innerText = p.nombre;
             document.getElementById('formato').innerText = p.formato;
             document.getElementById('fabricante').innerText = p.fabricante;
             const img = document.getElementById('foto');
-            if(p.foto) { img.src = p.foto; img.style.display = 'block'; } 
-            else { img.style.display = 'none'; }
+            if(p.foto) { img.src = p.foto; img.style.display = 'block'; } else { img.style.display = 'none'; }
         }
 
-        // 6. Configuración de Html5Qrcode
-        const html5QrCode = new Html5Qrcode("reader");
-        let escaneando = false;
+        // --- Lógica del Escáner ---
+        const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 }, false);
+        html5QrcodeScanner.render(buscarProducto);
 
-        // Función para manejar escaneo exitoso desde la cámara
-        function onCameraScanSuccess(decodedText) {
-            if(escaneando) return; // Evitar múltiples escaneos rápidos
-            escaneando = true;
-            html5QrCode.pause(); // Pausamos la cámara
-            
-            buscarProducto(decodedText).then(() => {
-                setTimeout(() => { 
-                    html5QrCode.resume(); 
-                    escaneando = false; 
-                }, 3000); // Reanudamos después de 3 segundos
-            });
-        }
-
-        // Iniciar cámara al cargar la página
-        Html5Qrcode.getCameras().then(devices => {
-            if (devices && devices.length) {
-                // Iniciamos la cámara trasera si está disponible
-                html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onCameraScanSuccess);
-            }
-        }).catch(err => { console.log("Cámara no disponible o sin permisos", err); });
-
-        // 7. Evento para escanear desde archivo (Botón Verde)
-        document.getElementById('qr-input-file').addEventListener('change', e => {
+        // --- Lógica para el botón de Foto (Independiente) ---
+        const fileScanner = new Html5Qrcode("reader"); // Instancia separada para archivos
+        document.getElementById('file-input').addEventListener('change', e => {
             if (e.target.files.length == 0) return;
-            const imageFile = e.target.files[0];
-            
-            // Usamos la función nativa de html5QrCode para archivos
-            html5QrCode.scanFile(imageFile, true)
+            fileScanner.scanFile(e.target.files[0], true)
                 .then(decodedText => buscarProducto(decodedText))
-                .catch(err => {
-                    alert("No se detectó un código de barras en la imagen. Intenta con otra foto más nítida.");
-                    console.log(err);
-                });
+                .catch(err => alert("No se pudo leer el código en la foto."));
         });
 
-        // 8. Evento de Búsqueda Manual
         function buscarManual() {
             const codigo = document.getElementById('input-manual').value.trim();
-            if (!codigo) {
-                alert("Ingresa un número primero.");
-                return;
-            }
-            buscarProducto(codigo);
+            if (codigo) buscarProducto(codigo);
         }
     </script>
 </body>
