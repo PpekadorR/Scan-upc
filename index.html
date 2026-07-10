@@ -8,39 +8,53 @@
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 15px; margin: 0; background: #f4f4f4; }
-        #reader { width: 100%; max-width: 400px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden;}
+        #reader { width: 100%; max-width: 400px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; }
         .card { background: white; padding: 20px; border-radius: 10px; margin-top: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        img { max-width: 150px; border-radius: 8px; margin: 0 auto; display: block; }
         
-        #nombre { margin: 10px 0 2px 0; font-size: 24px; }
-        #formato { margin: 2px 0; font-size: 18px; font-weight: normal; }
-        #fabricante { color: gray; margin: 2px 0 0 0; font-size: 16px; font-weight: normal; }
-        #estado { color: #007bff; font-weight: bold; margin-top: 10px; display: none; }
+        /* Botón de archivo personalizado */
+        .btn-file { background: #28a745; color: white; padding: 12px; border-radius: 5px; cursor: pointer; display: block; margin-top: 10px; font-weight: bold; }
+        input[type="file"] { display: none; }
 
-        /* Estilos para la barra de búsqueda manual */
+        /* Búsqueda manual */
         .search-box { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
         input[type="number"] { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; text-align: center; }
         button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; font-weight: bold; }
         button:active { background: #0056b3; }
+        
+        /* Ficha de producto */
+        img { max-width: 150px; border-radius: 8px; margin: 10px auto; display: block; }
+        #nombre { margin: 10px 0 2px 0; font-size: 24px; }
+        #formato { margin: 2px 0; font-size: 18px; font-weight: normal; }
+        #fabricante { color: gray; margin: 2px 0 0 0; font-size: 16px; font-weight: normal; }
+        #estado { color: #007bff; font-weight: bold; margin-top: 10px; display: none; }
     </style>
 </head>
 <body>
 
     <h2>Escáner de Productos</h2>
     
+    <!-- Contenedor del escáner de cámara -->
     <div id="reader"></div>
 
-    <!-- Nueva sección de búsqueda manual -->
+    <!-- Botón para subir foto -->
+    <label class="btn-file">
+        Escanear desde foto
+        <input type="file" id="qr-input-file" accept="image/*">
+    </label>
+
+    <!-- Sección de búsqueda manual -->
     <div class="card">
-        <p style="margin: 0 0 5px 0; color: gray; font-size: 14px;">¿No lee el código? Ingrésalo aquí:</p>
+        <p style="margin: 0 0 5px 0; color: gray; font-size: 14px;">¿Ingresar manual?</p>
         <div class="search-box">
             <input type="number" id="input-manual" placeholder="Ej: 789123456789">
             <button onclick="buscarManual()">Buscar</button>
         </div>
     </div>
 
+    <!-- Mensaje de estado -->
     <div id="estado">Buscando en múltiples bases de datos...</div>
 
+    <!-- Ficha del producto -->
     <div class="card" id="producto-info" style="display: none;">
         <img id="foto" src="" alt="Foto del producto">
         <h2 id="nombre"></h2>
@@ -49,12 +63,15 @@
     </div>
 
     <script>
+        // 1. Service Worker para PWA
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js');
+            navigator.serviceWorker.register('sw.js').catch(err => console.log("SW falló", err));
         }
 
+        // 2. Base de datos local
         let miBaseDatos = JSON.parse(localStorage.getItem('misProductos')) || {};
 
+        // 3. Sistema de puntuación para elegir el mejor resultado de las APIs
         function crearCandidato(nom, form, fab, img) {
             let p = {
                 nombre: nom || 'Nombre no disponible',
@@ -71,19 +88,20 @@
             return p;
         }
 
-        // Esta es la función principal que hace todo el trabajo, separada para ser usada por cámara y teclado
+        // 4. Motor de búsqueda (Consulta local y luego las 3 APIs)
         async function buscarProducto(codigoEscaneado) {
             document.getElementById('estado').style.display = 'block';
             document.getElementById('producto-info').style.display = 'none';
+            document.getElementById('input-manual').value = codigoEscaneado; // Reflejar en el input
 
-            // 1. Buscar en tu DB local
+            // Buscar en DB local
             if (miBaseDatos[codigoEscaneado]) {
                 mostrarProducto(miBaseDatos[codigoEscaneado]);
                 document.getElementById('estado').style.display = 'none';
                 return;
             }
 
-            // 2. Buscar en las APIs online
+            // Buscar online
             try {
                 const promesas = [
                     fetch(`https://world.openfoodfacts.org/api/v0/product/${codigoEscaneado}.json`).then(r => r.json()).catch(() => null),
@@ -116,9 +134,8 @@
                     localStorage.setItem('misProductos', JSON.stringify(miBaseDatos));
                     mostrarProducto(mejorProducto);
                 } else {
-                    alert("Producto no encontrado en ninguna base de datos.");
+                    alert("Producto no encontrado en las bases de datos.");
                 }
-
             } catch (error) {
                 alert("Error de conexión.");
             }
@@ -126,28 +143,7 @@
             document.getElementById('estado').style.display = 'none';
         }
 
-        // Función cuando la cámara escanea un código
-        function onScanSuccess(codigoEscaneado) {
-            html5QrcodeScanner.pause();
-            
-            // Llenar el cuadro de texto para que veas qué número leyó
-            document.getElementById('input-manual').value = codigoEscaneado;
-            
-            buscarProducto(codigoEscaneado).then(() => {
-                setTimeout(() => html5QrcodeScanner.resume(), 3000);
-            });
-        }
-
-        // Función cuando aprietas el botón "Buscar"
-        function buscarManual() {
-            const codigo = document.getElementById('input-manual').value.trim();
-            if (!codigo) {
-                alert("Por favor, ingresa un número de código de barras.");
-                return;
-            }
-            buscarProducto(codigo);
-        }
-
+        // 5. Mostrar en pantalla
         function mostrarProducto(p) {
             document.getElementById('producto-info').style.display = 'block';
             document.getElementById('nombre').innerText = p.nombre;
@@ -158,8 +154,55 @@
             else { img.style.display = 'none'; }
         }
 
-        const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 }, false);
-        html5QrcodeScanner.render(onScanSuccess);
+        // 6. Configuración de Html5Qrcode
+        const html5QrCode = new Html5Qrcode("reader");
+        let escaneando = false;
+
+        // Función para manejar escaneo exitoso desde la cámara
+        function onCameraScanSuccess(decodedText) {
+            if(escaneando) return; // Evitar múltiples escaneos rápidos
+            escaneando = true;
+            html5QrCode.pause(); // Pausamos la cámara
+            
+            buscarProducto(decodedText).then(() => {
+                setTimeout(() => { 
+                    html5QrCode.resume(); 
+                    escaneando = false; 
+                }, 3000); // Reanudamos después de 3 segundos
+            });
+        }
+
+        // Iniciar cámara al cargar la página
+        Html5Qrcode.getCameras().then(devices => {
+            if (devices && devices.length) {
+                // Iniciamos la cámara trasera si está disponible
+                html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onCameraScanSuccess);
+            }
+        }).catch(err => { console.log("Cámara no disponible o sin permisos", err); });
+
+        // 7. Evento para escanear desde archivo (Botón Verde)
+        document.getElementById('qr-input-file').addEventListener('change', e => {
+            if (e.target.files.length == 0) return;
+            const imageFile = e.target.files[0];
+            
+            // Usamos la función nativa de html5QrCode para archivos
+            html5QrCode.scanFile(imageFile, true)
+                .then(decodedText => buscarProducto(decodedText))
+                .catch(err => {
+                    alert("No se detectó un código de barras en la imagen. Intenta con otra foto más nítida.");
+                    console.log(err);
+                });
+        });
+
+        // 8. Evento de Búsqueda Manual
+        function buscarManual() {
+            const codigo = document.getElementById('input-manual').value.trim();
+            if (!codigo) {
+                alert("Ingresa un número primero.");
+                return;
+            }
+            buscarProducto(codigo);
+        }
     </script>
 </body>
 </html>
