@@ -13,7 +13,6 @@
         .btn-file { background: #28a745; color: white; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; margin-top: 15px; display: inline-block; border: none; font-size: 16px; }
         input[type="file"] { display: none; }
         
-        /* Búsqueda manual mejorada con botón 13 */
         .search-box { display: flex; gap: 5px; justify-content: center; margin-top: 10px; }
         input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; margin: 5px 0; text-align: center; }
         button { padding: 12px 15px; background: #007bff; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; font-weight: bold; }
@@ -23,7 +22,7 @@
         #nombre { margin: 10px 0 2px 0; font-size: 24px; }
         #formato { margin: 2px 0; font-size: 18px; }
         #fabricante { color: gray; margin: 2px 0 0 0; font-size: 16px; }
-        #estado, #form-manual { display: none; }
+        #form-manual { display: none; }
     </style>
 </head>
 <body>
@@ -41,8 +40,6 @@
             <button class="btn-13" onclick="calcularYBuscar()">13</button>
         </div>
     </div>
-
-    <div id="estado">Buscando en bases de datos...</div>
 
     <div class="card" id="form-manual">
         <h3>Producto nuevo</h3>
@@ -64,12 +61,10 @@
         let miBaseDatos = JSON.parse(localStorage.getItem('misProductos')) || {};
         let ultimoCodigoEscaneado = "";
 
-        // Lógica para calcular el dígito de control EAN-13
         function calcularDigitoEAN13(codigo12) {
             let sum = 0;
             for (let i = 0; i < 12; i++) {
                 let digit = parseInt(codigo12[i]);
-                // Posiciones impares (1,3,5...) tienen peso 1, pares (2,4,6...) tienen peso 3
                 if (i % 2 === 0) sum += digit * 1;
                 else sum += digit * 3;
             }
@@ -81,23 +76,21 @@
             if (cod.length === 12) {
                 let digitoControl = calcularDigitoEAN13(cod);
                 let codCompleto = cod + digitoControl;
-                alert("Código calculado: " + codCompleto);
+                // La alerta se ha eliminado para que la búsqueda sea directa
                 buscarProducto(codCompleto);
             } else {
-                alert("Por favor, ingresa exactamente 12 dígitos para calcular el 13º.");
+                alert("Ingresa 12 dígitos para calcular el 13º.");
             }
         }
 
         async function buscarProducto(codigo) {
             ultimoCodigoEscaneado = codigo;
-            document.getElementById('estado').style.display = 'block';
             document.getElementById('producto-info').style.display = 'none';
             document.getElementById('form-manual').style.display = 'none';
             document.getElementById('input-manual').value = codigo;
 
             if (miBaseDatos[codigo]) {
                 mostrarProducto(miBaseDatos[codigo]);
-                document.getElementById('estado').style.display = 'none';
                 return;
             }
 
@@ -127,7 +120,6 @@
                     document.getElementById('form-manual').style.display = 'block';
                 }
             } catch (error) { alert("Error de conexión."); }
-            document.getElementById('estado').style.display = 'none';
         }
 
         function guardarManual() {
