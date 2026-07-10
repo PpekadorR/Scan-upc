@@ -3,23 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mi Escáner</title>
+    <title>Mi Escáner Pro</title>
     <link rel="manifest" href="manifest.json">
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 15px; margin: 0; background: #f4f4f4; }
         #reader { width: 100%; max-width: 400px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden;}
         .card { background: white; padding: 20px; border-radius: 10px; margin-top: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        img { max-width: 150px; border-radius: 8px; }
-        
-        /* Estilos para que el texto se vea como pediste */
+        img { max-width: 150px; border-radius: 8px; margin: 0 auto; }
         #nombre { margin: 10px 0 2px 0; font-size: 24px; }
         #formato { margin: 2px 0; font-size: 18px; font-weight: normal; }
         #fabricante { color: gray; margin: 2px 0 0 0; font-size: 16px; font-weight: normal; }
-        
-        /* Estilos para la lista de la base de datos local */
         ul { text-align: left; padding: 0; list-style-type: none; }
         li { background: #f9f9f9; margin-bottom: 10px; padding: 12px; border-radius: 5px; border-left: 4px solid #007bff; }
+        #estado { color: #007bff; font-weight: bold; margin-top: 10px; display: none; }
     </style>
 </head>
 <body>
@@ -27,8 +24,8 @@
     <h2>Escáner de Productos</h2>
     
     <div id="reader"></div>
+    <div id="estado">Buscando en múltiples bases de datos...</div>
 
-    <!-- Ficha del producto con el nuevo orden -->
     <div class="card" id="producto-info" style="display: none;">
         <img id="foto" src="" alt="Foto del producto">
         <h2 id="nombre"></h2>
@@ -53,7 +50,6 @@
             lista.innerHTML = '';
             for (let codigo in miBaseDatos) {
                 let p = miBaseDatos[codigo];
-                // Mostramos los 3 datos apilados en la lista
                 lista.innerHTML += `
                     <li>
                         <b>${p.nombre}</b><br>
@@ -64,39 +60,90 @@
         }
         actualizarVista();
 
-        function onScanSuccess(codigoEscaneado) {
+        // Función para evaluar y puntuar cada resultado
+        function crearCandidato(nom, form, fab, img) {
+            let p = {
+                nombre: nom || 'Nombre no disponible',
+                formato: form || 'Formato desconocido',
+                fabricante: fab || 'Fabricante desconocido',
+                foto: img || ''
+            };
+
+            let puntos = 0;
+            if (p.nombre !== 'Nombre no disponible') puntos += 3;
+            if (p.formato !== 'Formato desconocido') puntos += 1;
+            if (p.fabricante !== 'Fabricante desconocido') puntos += 1;
+            if (p.foto !== '') puntos += 4; // Prioridad alta a la foto
+
+            p.puntaje = puntos;
+            return p;
+        }
+
+        async function onScanSuccess(codigoEscaneado) {
             html5QrcodeScanner.pause();
             
+            // Si ya está guardado localmente, no gasta internet
             if (miBaseDatos[codigoEscaneado]) {
                 mostrarProducto(miBaseDatos[codigoEscaneado]);
                 setTimeout(() => html5QrcodeScanner.resume(), 3000);
                 return;
             }
 
-            fetch(`https://world.openfoodfacts.org/api/v0/product/${codigoEscaneado}.json`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === 1) {
-                        // Extraemos el formato (quantity) de la API
-                        const nuevoProducto = {
-                            nombre: data.product.product_name || 'Nombre no disponible',
-                            formato: data.product.quantity || 'Formato desconocido',
-                            fabricante: data.product.brands || 'Fabricante desconocido',
-                            foto: data.product.image_url || ''
-                        };
-                        
-                        miBaseDatos[codigoEscaneado] = nuevoProducto;
-                        localStorage.setItem('misProductos', JSON.stringify(miBaseDatos));
-                        mostrarProducto(nuevoProducto);
-                        actualizarVista();
-                    } else {
-                        alert("Producto no encontrado en la API online.");
-                    }
-                    setTimeout(() => html5QrcodeScanner.resume(), 3000);
-                }).catch(err => {
-                    alert("Error de conexión a internet.");
-                    setTimeout(() => html5QrcodeScanner.resume(), 3000);
-                });
+            document.getElementById('estado').style.display = 'block';
+
+            try {
+                // Consultamos las 3 bases de datos AL MISMO TIEMPO
+                const promesas = [
+                    fetch(`https://world.openfoodfacts.org/api/v0/product/${codigoEscaneado}.json`).then(r => r.json()).catch(() => null),
+                    fetch(`https://world.openproductsfacts.org/api/v0/product/${codigoEscaneado}.json`).then(r => r.json()).catch(() => null),
+                    fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${codigoEscaneado}`).then(r => r.json()).catch(() => null)
+                ];
+
+                const resultados = await Promise.all(promesas);
+                let candidatos = [];
+
+                // 1. Analizar resultado de Open Food Facts
+                if (resultados[0] && resultados[0].status === 1) {
+                    let prod = resultados[0].product;
+                    candidatos.push(crearCandidato(prod.product_name, prod.quantity, prod.brands, prod.image_url));
+                }
+
+                // 2. Analizar resultado de Open Products Facts
+                if (resultados[1] && resultados[1].status === 1) {
+                    let prod = resultados[1].product;
+                    candidatos.push(crearCandidato(prod.product_name, prod.quantity, prod.brands, prod.image_url));
+                }
+
+                // 3. Analizar resultado de UPCitemdb
+                if (resultados[2] && resultados[2].code === "OK" && resultados[2].items.length > 0) {
+                    let item = resultados[2].items[0];
+                    candidatos.push(crearCandidato(item.title, item.size || item.weight, item.brand, item.images.length > 0 ? item.images[0] : ''));
+                }
+
+                // Seleccionar al ganador
+                if (candidatos.length > 0) {
+                    // Ordenar de mayor a menor puntaje
+                    candidatos.sort((a, b) => b.puntaje - a.puntaje);
+                    const mejorProducto = candidatos[0];
+
+                    // Borramos el puntaje antes de guardar en tu memoria para ahorrar espacio
+                    delete mejorProducto.puntaje;
+
+                    miBaseDatos[codigoEscaneado] = mejorProducto;
+                    localStorage.setItem('misProductos', JSON.stringify(miBaseDatos));
+                    mostrarProducto(mejorProducto);
+                    actualizarVista();
+                } else {
+                    alert("No se encontró el producto en ninguna de las 3 bases de datos.");
+                }
+
+            } catch (error) {
+                console.error(error);
+                alert("Error al buscar en internet.");
+            }
+
+            document.getElementById('estado').style.display = 'none';
+            setTimeout(() => html5QrcodeScanner.resume(), 3500);
         }
 
         function mostrarProducto(p) {
@@ -106,7 +153,7 @@
             document.getElementById('fabricante').innerText = p.fabricante;
             
             const img = document.getElementById('foto');
-            if(p.foto) { img.src = p.foto; img.style.display = 'block'; margin = "0 auto"; } 
+            if(p.foto) { img.src = p.foto; img.style.display = 'block'; } 
             else { img.style.display = 'none'; }
         }
 
