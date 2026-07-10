@@ -10,12 +10,10 @@
         body { font-family: Arial, sans-serif; text-align: center; padding: 15px; margin: 0; background: #f4f4f4; }
         #reader { width: 100%; max-width: 400px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden;}
         .card { background: white; padding: 20px; border-radius: 10px; margin-top: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        img { max-width: 150px; border-radius: 8px; margin: 0 auto; }
+        img { max-width: 150px; border-radius: 8px; margin: 0 auto; display: block; }
         #nombre { margin: 10px 0 2px 0; font-size: 24px; }
         #formato { margin: 2px 0; font-size: 18px; font-weight: normal; }
         #fabricante { color: gray; margin: 2px 0 0 0; font-size: 16px; font-weight: normal; }
-        ul { text-align: left; padding: 0; list-style-type: none; }
-        li { background: #f9f9f9; margin-bottom: 10px; padding: 12px; border-radius: 5px; border-left: 4px solid #007bff; }
         #estado { color: #007bff; font-weight: bold; margin-top: 10px; display: none; }
     </style>
 </head>
@@ -33,34 +31,14 @@
         <h3 id="fabricante"></h3>
     </div>
 
-    <div class="card">
-        <h3>Mi Base de Datos Local</h3>
-        <ul id="lista-db"></ul>
-    </div>
-
     <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js');
         }
 
+        // Recuperamos la DB interna
         let miBaseDatos = JSON.parse(localStorage.getItem('misProductos')) || {};
 
-        function actualizarVista() {
-            const lista = document.getElementById('lista-db');
-            lista.innerHTML = '';
-            for (let codigo in miBaseDatos) {
-                let p = miBaseDatos[codigo];
-                lista.innerHTML += `
-                    <li>
-                        <b>${p.nombre}</b><br>
-                        ${p.formato}<br>
-                        <span style="color:gray">${p.fabricante}</span>
-                    </li>`;
-            }
-        }
-        actualizarVista();
-
-        // Función para evaluar y puntuar cada resultado
         function crearCandidato(nom, form, fab, img) {
             let p = {
                 nombre: nom || 'Nombre no disponible',
@@ -68,13 +46,11 @@
                 fabricante: fab || 'Fabricante desconocido',
                 foto: img || ''
             };
-
             let puntos = 0;
             if (p.nombre !== 'Nombre no disponible') puntos += 3;
             if (p.formato !== 'Formato desconocido') puntos += 1;
             if (p.fabricante !== 'Fabricante desconocido') puntos += 1;
-            if (p.foto !== '') puntos += 4; // Prioridad alta a la foto
-
+            if (p.foto !== '') puntos += 4;
             p.puntaje = puntos;
             return p;
         }
@@ -82,7 +58,7 @@
         async function onScanSuccess(codigoEscaneado) {
             html5QrcodeScanner.pause();
             
-            // Si ya está guardado localmente, no gasta internet
+            // Búsqueda instantánea en DB local (ya sin mostrar la lista)
             if (miBaseDatos[codigoEscaneado]) {
                 mostrarProducto(miBaseDatos[codigoEscaneado]);
                 setTimeout(() => html5QrcodeScanner.resume(), 3000);
@@ -92,7 +68,6 @@
             document.getElementById('estado').style.display = 'block';
 
             try {
-                // Consultamos las 3 bases de datos AL MISMO TIEMPO
                 const promesas = [
                     fetch(`https://world.openfoodfacts.org/api/v0/product/${codigoEscaneado}.json`).then(r => r.json()).catch(() => null),
                     fetch(`https://world.openproductsfacts.org/api/v0/product/${codigoEscaneado}.json`).then(r => r.json()).catch(() => null),
@@ -102,48 +77,37 @@
                 const resultados = await Promise.all(promesas);
                 let candidatos = [];
 
-                // 1. Analizar resultado de Open Food Facts
                 if (resultados[0] && resultados[0].status === 1) {
                     let prod = resultados[0].product;
                     candidatos.push(crearCandidato(prod.product_name, prod.quantity, prod.brands, prod.image_url));
                 }
-
-                // 2. Analizar resultado de Open Products Facts
                 if (resultados[1] && resultados[1].status === 1) {
                     let prod = resultados[1].product;
                     candidatos.push(crearCandidato(prod.product_name, prod.quantity, prod.brands, prod.image_url));
                 }
-
-                // 3. Analizar resultado de UPCitemdb
                 if (resultados[2] && resultados[2].code === "OK" && resultados[2].items.length > 0) {
                     let item = resultados[2].items[0];
                     candidatos.push(crearCandidato(item.title, item.size || item.weight, item.brand, item.images.length > 0 ? item.images[0] : ''));
                 }
 
-                // Seleccionar al ganador
                 if (candidatos.length > 0) {
-                    // Ordenar de mayor a menor puntaje
                     candidatos.sort((a, b) => b.puntaje - a.puntaje);
                     const mejorProducto = candidatos[0];
-
-                    // Borramos el puntaje antes de guardar en tu memoria para ahorrar espacio
                     delete mejorProducto.puntaje;
 
                     miBaseDatos[codigoEscaneado] = mejorProducto;
                     localStorage.setItem('misProductos', JSON.stringify(miBaseDatos));
                     mostrarProducto(mejorProducto);
-                    actualizarVista();
                 } else {
-                    alert("No se encontró el producto en ninguna de las 3 bases de datos.");
+                    alert("Producto no encontrado en ninguna base de datos.");
                 }
 
             } catch (error) {
-                console.error(error);
-                alert("Error al buscar en internet.");
+                alert("Error de conexión.");
             }
 
             document.getElementById('estado').style.display = 'none';
-            setTimeout(() => html5QrcodeScanner.resume(), 3500);
+            setTimeout(() => html5QrcodeScanner.resume(), 3000);
         }
 
         function mostrarProducto(p) {
@@ -151,7 +115,6 @@
             document.getElementById('nombre').innerText = p.nombre;
             document.getElementById('formato').innerText = p.formato;
             document.getElementById('fabricante').innerText = p.fabricante;
-            
             const img = document.getElementById('foto');
             if(p.foto) { img.src = p.foto; img.style.display = 'block'; } 
             else { img.style.display = 'none'; }
@@ -160,6 +123,5 @@
         const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 }, false);
         html5QrcodeScanner.render(onScanSuccess);
     </script>
-
 </body>
 </html>
