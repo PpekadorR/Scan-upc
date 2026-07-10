@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Escáner</title>
+    <!-- Esto conecta con el archivo que la hace instalable -->
+    <link rel="manifest" href="manifest.json">
+    <!-- Librería gratuita para usar la cámara y leer códigos -->
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 15px; margin: 0; background: #f4f4f4; }
+        #reader { width: 100%; max-width: 400px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden;}
+        .card { background: white; padding: 20px; border-radius: 10px; margin-top: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        img { max-width: 150px; border-radius: 8px; }
+        #nombre { margin: 10px 0 5px 0; }
+        #fabricante { color: gray; margin: 0; }
+        ul { text-align: left; padding-left: 20px; }
+    </style>
+</head>
+<body>
+
+    <h2>Escáner de Productos</h2>
+    
+    <!-- Aquí se mostrará la cámara -->
+    <div id="reader"></div>
+
+    <!-- Aquí mostramos el resultado del escaneo -->
+    <div class="card" id="producto-info" style="display: none;">
+        <img id="foto" src="" alt="Foto del producto">
+        <h2 id="nombre"></h2>
+        <h3 id="fabricante"></h3>
+    </div>
+
+    <!-- Tu base de datos local visible -->
+    <div class="card">
+        <h3>Mi Base de Datos Local</h3>
+        <ul id="lista-db"></ul>
+    </div>
+
+    <script>
+        // 1. Activar el Service Worker para que sea instalable en Chrome
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+
+        // 2. Cargar tu Base de Datos Local (Memoria del teléfono)
+        let miBaseDatos = JSON.parse(localStorage.getItem('misProductos')) || {};
+
+        function actualizarVista() {
+            const lista = document.getElementById('lista-db');
+            lista.innerHTML = '';
+            for (let codigo in miBaseDatos) {
+                let p = miBaseDatos[codigo];
+                lista.innerHTML += `<li><b>${p.nombre}</b> (${p.fabricante})</li>`;
+            }
+        }
+        actualizarVista();
+
+        // 3. Función que se ejecuta cuando lee un código
+        function onScanSuccess(codigoEscaneado) {
+            // Pausar escáner un momento
+            html5QrcodeScanner.pause();
+            
+            // ¿Ya está en tu base local?
+            if (miBaseDatos[codigoEscaneado]) {
+                mostrarProducto(miBaseDatos[codigoEscaneado]);
+                setTimeout(() => html5QrcodeScanner.resume(), 3000);
+                return;
+            }
+
+            // Si no está, buscar en API Online (Open Food Facts)
+            fetch(`https://world.openfoodfacts.org/api/v0/product/${codigoEscaneado}.json`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 1) {
+                        // Crear el molde del producto
+                        const nuevoProducto = {
+                            nombre: data.product.product_name || 'Nombre no disponible',
+                            fabricante: data.product.brands || 'Fabricante desconocido',
+                            foto: data.product.image_url || ''
+                        };
+                        
+                        // Guardar en tu base de datos local y actualizar pantalla
+                        miBaseDatos[codigoEscaneado] = nuevoProducto;
+                        localStorage.setItem('misProductos', JSON.stringify(miBaseDatos));
+                        mostrarProducto(nuevoProducto);
+                        actualizarVista();
+                    } else {
+                        alert("Producto no encontrado en la API online.");
+                    }
+                    // Reactivar cámara después de 3 segundos
+                    setTimeout(() => html5QrcodeScanner.resume(), 3000);
+                }).catch(err => {
+                    alert("Error de conexión a internet.");
+                    setTimeout(() => html5QrcodeScanner.resume(), 3000);
+                });
+        }
+
+        function mostrarProducto(p) {
+            document.getElementById('producto-info').style.display = 'block';
+            document.getElementById('nombre').innerText = p.nombre;
+            document.getElementById('fabricante').innerText = p.fabricante;
+            const img = document.getElementById('foto');
+            if(p.foto) { img.src = p.foto; img.style.display = 'block'; } 
+            else { img.style.display = 'none'; }
+        }
+
+        // 4. Iniciar la cámara
+        const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 }, false);
+        html5QrcodeScanner.render(onScanSuccess);
+    </script>
+
+</body>
+</html>
