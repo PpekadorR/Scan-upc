@@ -10,76 +10,61 @@
         body { font-family: Arial, sans-serif; text-align: center; padding: 15px; margin: 0; background: #f4f4f4; }
         #reader { width: 100%; max-width: 400px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; }
         .card { background: white; padding: 20px; border-radius: 10px; margin-top: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        
-        /* Botón de archivo independiente */
         .btn-file { background: #28a745; color: white; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; margin-top: 15px; display: inline-block; border: none; font-size: 16px; }
         input[type="file"] { display: none; }
-
-        /* Búsqueda manual */
         .search-box { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
-        input[type="number"] { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; text-align: center; }
+        input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; margin: 5px 0; }
         button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; font-weight: bold; }
-        
         img { max-width: 150px; border-radius: 8px; margin: 10px auto; display: block; }
         #nombre { margin: 10px 0 2px 0; font-size: 24px; }
         #formato { margin: 2px 0; font-size: 18px; }
         #fabricante { color: gray; margin: 2px 0 0 0; font-size: 16px; }
-        #estado { color: #007bff; font-weight: bold; margin-top: 10px; display: none; }
+        #estado, #form-manual { display: none; }
     </style>
 </head>
 <body>
 
     <h2>Escáner de Productos</h2>
-    
     <div id="reader"></div>
 
-    <!-- Botón que abre el selector de archivos -->
-    <label class="btn-file">
-        Escanear desde foto
-        <input type="file" id="file-input" accept="image/*">
-    </label>
+    <label class="btn-file">Escanear desde foto<input type="file" id="file-input" accept="image/*"></label>
 
     <div class="card">
-        <p style="margin: 0 0 5px 0; color: gray; font-size: 14px;">¿Ingresar manual?</p>
+        <p style="margin: 0; color: gray; font-size: 14px;">¿Ingresar manual?</p>
         <div class="search-box">
-            <input type="number" id="input-manual" placeholder="Ej: 789123456789">
+            <input type="number" id="input-manual" placeholder="Código de barras">
             <button onclick="buscarManual()">Buscar</button>
         </div>
     </div>
 
     <div id="estado">Buscando en bases de datos...</div>
 
+    <!-- Formulario para agregar manualmente si no se encuentra -->
+    <div class="card" id="form-manual">
+        <h3>Producto nuevo</h3>
+        <p>No se encontró en la red. Regístralo tú:</p>
+        <input type="text" id="new-name" placeholder="Nombre del producto">
+        <input type="text" id="new-brand" placeholder="Fabricante">
+        <input type="text" id="new-size" placeholder="Formato (ej: 3 litros)">
+        <button onclick="guardarManual()">Guardar en mi base</button>
+    </div>
+
     <div class="card" id="producto-info" style="display: none;">
-        <img id="foto" src="" alt="Foto del producto">
+        <img id="foto" src="" alt="Foto" style="display:none;">
         <h2 id="nombre"></h2>
         <h3 id="formato"></h3>
         <h3 id="fabricante"></h3>
     </div>
 
     <script>
-        // Registrar Service Worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js');
-        }
-
         let miBaseDatos = JSON.parse(localStorage.getItem('misProductos')) || {};
+        let ultimoCodigoEscaneado = "";
 
-        // Función para procesar y puntuar productos
-        function crearCandidato(nom, form, fab, img) {
-            let p = { nombre: nom || 'Nombre no disponible', formato: form || 'Formato desconocido', fabricante: fab || 'Fabricante desconocido', foto: img || '' };
-            let puntos = 0;
-            if (p.nombre !== 'Nombre no disponible') puntos += 3;
-            if (p.formato !== 'Formato desconocido') puntos += 1;
-            if (p.fabricante !== 'Fabricante desconocido') puntos += 1;
-            if (p.foto !== '') puntos += 4;
-            p.puntaje = puntos;
-            return p;
-        }
-
-        // Motor de búsqueda centralizado
         async function buscarProducto(codigo) {
+            ultimoCodigoEscaneado = codigo;
             document.getElementById('estado').style.display = 'block';
             document.getElementById('producto-info').style.display = 'none';
+            document.getElementById('form-manual').style.display = 'none';
             document.getElementById('input-manual').value = codigo;
 
             if (miBaseDatos[codigo]) {
@@ -98,33 +83,36 @@
                 const resultados = await Promise.all(promesas);
                 let candidatos = [];
 
-                if (resultados[0] && resultados[0].status === 1) {
-                    let prod = resultados[0].product;
-                    candidatos.push(crearCandidato(prod.product_name, prod.quantity, prod.brands, prod.image_url));
-                }
-                if (resultados[1] && resultados[1].status === 1) {
-                    let prod = resultados[1].product;
-                    candidatos.push(crearCandidato(prod.product_name, prod.quantity, prod.brands, prod.image_url));
-                }
+                if (resultados[0] && resultados[0].status === 1) candidatos.push({nombre: resultados[0].product.product_name, formato: resultados[0].product.quantity, fabricante: resultados[0].product.brands, foto: resultados[0].product.image_url, puntos: 8});
+                if (resultados[1] && resultados[1].status === 1) candidatos.push({nombre: resultados[1].product.product_name, formato: resultados[1].product.quantity, fabricante: resultados[1].product.brands, foto: resultados[1].product.image_url, puntos: 8});
                 if (resultados[2] && resultados[2].code === "OK" && resultados[2].items.length > 0) {
-                    let item = resultados[2].items[0];
-                    candidatos.push(crearCandidato(item.title, item.size || item.weight, item.brand, item.images.length > 0 ? item.images[0] : ''));
+                    let i = resultados[2].items[0];
+                    candidatos.push({nombre: i.title, formato: i.size, fabricante: i.brand, foto: i.images[0], puntos: 7});
                 }
 
                 if (candidatos.length > 0) {
-                    candidatos.sort((a, b) => b.puntaje - a.puntaje);
-                    const mejorProducto = candidatos[0];
-                    delete mejorProducto.puntaje;
-                    miBaseDatos[codigo] = mejorProducto;
+                    candidatos.sort((a, b) => b.puntos - a.puntos);
+                    miBaseDatos[codigo] = candidatos[0];
                     localStorage.setItem('misProductos', JSON.stringify(miBaseDatos));
-                    mostrarProducto(mejorProducto);
+                    mostrarProducto(candidatos[0]);
                 } else {
-                    alert("Producto no encontrado.");
+                    document.getElementById('form-manual').style.display = 'block';
                 }
-            } catch (error) {
-                alert("Error de conexión.");
-            }
+            } catch (error) { alert("Error de conexión."); }
             document.getElementById('estado').style.display = 'none';
+        }
+
+        function guardarManual() {
+            const p = {
+                nombre: document.getElementById('new-name').value,
+                fabricante: document.getElementById('new-brand').value,
+                formato: document.getElementById('new-size').value,
+                foto: ""
+            };
+            miBaseDatos[ultimoCodigoEscaneado] = p;
+            localStorage.setItem('misProductos', JSON.stringify(miBaseDatos));
+            mostrarProducto(p);
+            document.getElementById('form-manual').style.display = 'none';
         }
 
         function mostrarProducto(p) {
@@ -136,23 +124,15 @@
             if(p.foto) { img.src = p.foto; img.style.display = 'block'; } else { img.style.display = 'none'; }
         }
 
-        // --- Lógica del Escáner ---
         const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 }, false);
         html5QrcodeScanner.render(buscarProducto);
-
-        // --- Lógica para el botón de Foto (Independiente) ---
-        const fileScanner = new Html5Qrcode("reader"); // Instancia separada para archivos
+        
+        const fileScanner = new Html5Qrcode("reader");
         document.getElementById('file-input').addEventListener('change', e => {
-            if (e.target.files.length == 0) return;
-            fileScanner.scanFile(e.target.files[0], true)
-                .then(decodedText => buscarProducto(decodedText))
-                .catch(err => alert("No se pudo leer el código en la foto."));
+            if (e.target.files.length > 0) fileScanner.scanFile(e.target.files[0], true).then(buscarProducto).catch(() => alert("No se pudo leer la foto."));
         });
 
-        function buscarManual() {
-            const codigo = document.getElementById('input-manual').value.trim();
-            if (codigo) buscarProducto(codigo);
-        }
+        function buscarManual() { const cod = document.getElementById('input-manual').value.trim(); if(cod) buscarProducto(cod); }
     </script>
 </body>
 </html>
